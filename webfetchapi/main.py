@@ -3,12 +3,10 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from .settings import Settings
-from .schemas import SearchRequest, SearchResponse, ResearchRequest, ResearchResponse
+from .schemas import SearchRequest, SearchResponse
 from .errors import UpstreamError
 from .local_only import LocalOnlyMiddleware
 from .search_service import search_only
-from .research_service import research
-from .ollama_client import list_models
 
 
 def create_app(settings=None, transport=None):
@@ -22,8 +20,8 @@ def create_app(settings=None, transport=None):
             app.state.client = client
             yield
 
-    app = FastAPI(title='webfetchapi：本機網路搜尋服務', version='1.0.0', lifespan=lifespan,
-                  description='只接受本機呼叫，無呼叫端 API key。/api/search 只需 Tavily 金鑰，模型整合為選用。')
+    app = FastAPI(title='webfetchapi：本機網路內容搜尋服務', version='2.0.0', lifespan=lifespan,
+                  description='依關鍵字搜尋並擷取網頁正文；只接受本機呼叫，不需呼叫端 API key。')
     app.add_middleware(LocalOnlyMiddleware)
 
     @app.exception_handler(UpstreamError)
@@ -38,31 +36,13 @@ def create_app(settings=None, transport=None):
     async def health(request: Request):
         config = request.app.state.settings
         return {'status': 'ok', 'mode': 'demo' if config.demo else 'live',
-                'search_enabled': True, 'research_enabled': config.research_enabled}
+                'search_enabled': True, 'body_extraction_enabled': True}
 
-    @app.post('/api/search', response_model=SearchResponse, summary='網路搜尋，不呼叫模型')
+    @app.post('/api/search', response_model=SearchResponse, summary='網路搜尋與正文擷取')
     async def search(payload: SearchRequest, request: Request):
         return await limited(request.app.state, search_only, payload)
 
-    @app.get('/api/models', summary='選用：校內 Ollama 模型清單')
-    async def models(request: Request):
-        state = request.app.state
-        require_research(state.settings)
-        names = ['demo-model'] if state.settings.demo else await list_models(state.client, state.settings)
-        return {'models': names, 'mode': 'demo' if state.settings.demo else 'live'}
-
-    @app.post('/api/research', response_model=ResearchResponse, summary='選用：搜尋後由校內模型整合')
-    async def run(payload: ResearchRequest, request: Request):
-        require_research(request.app.state.settings)
-        return await limited(request.app.state, research, payload)
-
     return app
-
-
-def require_research(settings):
-    if not settings.research_enabled:
-        raise UpstreamError('模型整合尚未設定。純搜尋請使用 /api/search；整合需設定 OLLAMA_GATEWAY_API_KEY。',
-                            503, 'model_not_configured')
 
 
 async def limited(state, function, payload):

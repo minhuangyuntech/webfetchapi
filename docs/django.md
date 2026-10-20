@@ -1,128 +1,129 @@
-# Django 串接與完整範例
+# 兩個獨立 Django 範例
 
-先依 [README](../README.md) 啟動 FastAPI，保持第一個終端機運作。以下在**第二個終端機、repo 根目錄**執行。可先用 `DEMO_MODE=1` 驗證整個網站流程。
+兩個 Django 網站均從後端呼叫同機 `webfetchapi`。範例一顯示搜尋內容；範例二再由自己的後端直接呼叫 `http://140.125.35.48:9999` 的 Pi gateway。瀏覽器不直接持有任何 API key。
 
-## 執行內附網站
+以下指令均在 **repo 根目錄** 執行，並先依 README 啟動 FastAPI。每個網站使用另一個終端機；所有 `run.py` 都會讀取對應網站 `.env` 的 `DJANGO_PORT` 並綁定 `127.0.0.1`。macOS 與 Raspberry Pi 使用相同 Python 指令。
+
+## 範例一：顯示搜尋片段、正文與來源
 
 Windows PowerShell：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r examples/django_site/requirements.txt
-$env:WEBFETCHAPI_URL = 'http://127.0.0.1:8001'
-.\.venv\Scripts\python.exe examples/django_site/manage.py runserver 127.0.0.1:8000
+Copy-Item examples/django_site/.env.example examples/django_site/.env
+.\.venv\Scripts\python.exe examples/django_site/run.py
 ```
 
 macOS / Raspberry Pi：
 
 ```bash
 .venv/bin/python -m pip install -r examples/django_site/requirements.txt
-export WEBFETCHAPI_URL=http://127.0.0.1:8001
-.venv/bin/python examples/django_site/manage.py runserver 127.0.0.1:8000
+cp examples/django_site/.env.example examples/django_site/.env
+.venv/bin/python examples/django_site/run.py
 ```
 
-在**執行 Django 的電腦**開啟 [http://127.0.0.1:8000](http://127.0.0.1:8000)，輸入對象或問題，送出後就能查看搜尋片段。這個最小範例沒有資料表、登入或歷史記錄，因此不需要 `migrate`。
+開啟 [http://127.0.0.1:8000](http://127.0.0.1:8000)。輸入關鍵字；「擷取網頁正文」預設勾選，取消時只取得搜尋片段。
 
-若 FastAPI 的 `.env` 設為 `PORT=8101`，此處的 `WEBFETCHAPI_URL` 要改成 `http://127.0.0.1:8101`。若 Django 的 8000 已占用，可將 `runserver` 後面改成 `127.0.0.1:8100`。根目錄 `.env` 由 FastAPI 讀取；此 Django 範例的 `WEBFETCHAPI_URL` 透過終端機環境變數設定。
+此網站不呼叫模型、不改寫內容，沒有模型金鑰。template 原樣顯示 API 回傳的文字，保留換行並使用 HTML escaping；來源中的 HTML 標籤會顯示成文字，不會執行。正文擷取失敗或服務截短時，顯示對應狀態。
 
-範例的 `DEBUG=True` 與預設 `SECRET_KEY` 僅供本機開發。若整合到既有 Django 專案，沿用該專案的正式設定。`runserver` 用於本機開發測試。
+此網站 `.env`：
 
-## 放進自己的 Django 專案
-
-在自己的 Django 虛擬環境安裝 `httpx`，並在 `settings.py` 設定：
-
-```python
-import os
-WEBFETCHAPI_URL = os.environ.get('WEBFETCHAPI_URL', 'http://127.0.0.1:8001').rstrip('/')
+```dotenv
+WEBFETCHAPI_URL=http://127.0.0.1:8001
+DJANGO_PORT=8000
 ```
 
-在 view 中用已驗證的表單欄位組成 JSON：
+## 範例二：搜尋後由 Django 呼叫模型
 
-```python
-import httpx
-from django.conf import settings
+Windows PowerShell：
 
-def search_web(query, max_results=5):
-    with httpx.Client(timeout=30, trust_env=False) as client:
-        response = client.post(
-            f'{settings.WEBFETCHAPI_URL}/api/search',
-            json={'query': query, 'max_results': max_results},
-        )
-        response.raise_for_status()
-        return response.json()
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r examples/django_summary_site/requirements.txt
+Copy-Item examples/django_summary_site/.env.example examples/django_summary_site/.env
+notepad examples/django_summary_site/.env
 ```
 
-不需要在 Django 放入 Tavily key 或 `X-API-Key`。若介面有「搜尋對象」與「想瞭解的問題」兩個欄位，可將驗證後的文字以空格組合為 `query`，總長度需在 720 字元內。
+macOS / Raspberry Pi：
 
-完整錯誤處理見 [`searchdemo/views.py`](../examples/django_site/searchdemo/views.py)：
-
-- 表單驗證錯誤：在頁面顯示欄位訊息，不送出 API 請求。
-- `TimeoutException`：提示稍後重試。
-- `HTTPStatusError`：顯示狀態碼，依 FastAPI 文件檢查設定。
-- `RequestError`：提示確認 FastAPI 是否啟動及連接埠是否一致。
-
-template 保留 Django 預設 HTML escaping，不對網路文字使用 `safe`。外部網頁內容仍可能有錯誤或夾帶指令；若要交給模型，應將它視為待分析資料，並保留來源供查核。
-
-## Python 非同步寫法
-
-若自己的 Django view 是 `async def`，呼叫外部 HTTP 時可使用 `httpx.AsyncClient`：
-
-```python
-import httpx
-from django.conf import settings
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-
-@require_GET
-async def search_json(request):
-    query = request.GET.get('q', '').strip()
-    if not 1 <= len(query) <= 720:
-        return JsonResponse({'error': '搜尋字詞須為 1–720 字元。'}, status=400)
-    try:
-        async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
-            response = await client.post(
-                f'{settings.WEBFETCHAPI_URL}/api/search',
-                json={'query': query, 'max_results': 5},
-            )
-            response.raise_for_status()
-            return JsonResponse(response.json())
-    except httpx.HTTPError:
-        return JsonResponse({'error': '搜尋服務暫時無法使用。'}, status=502)
+```bash
+.venv/bin/python -m pip install -r examples/django_summary_site/requirements.txt
+cp examples/django_summary_site/.env.example examples/django_summary_site/.env
+nano examples/django_summary_site/.env
 ```
 
-`await` 在等待網路回應時讓出事件迴圈，使其他協程有機會執行。它不會使單次搜尋本身變快。此範例的 `JsonResponse` 接收的是已解析的 JSON；`response.json()` 是同步解析，不需 `await`。
+在此網站的 `.env` 設定 Pi 金鑰與模型。Tavily key 留在 FastAPI 的 `.env`，不複製到 Django：
 
-Django 在 ASGI 下搭配非同步相容的 middleware，才能完整利用非同步請求處理；單純把 `def` 改為 `async def` 不代表整個網站已具備此能力。內附網站先使用容易整合的同步 view，FastAPI 內部仍採用非同步 HTTPX 連外。
-
-## 檔案關係
-
-```mermaid
-flowchart TD
-    M[manage.py] --> S[settings.py]
-    S --> U[urls.py]
-    U --> V[searchdemo/views.py]
-    V --> F[forms.py：驗證輸入]
-    V -->|HTTPX POST| API[本機 FastAPI /api/search]
-    API -->|JSON sources| V
-    V --> T[templates/searchdemo/index.html]
-    T --> B[瀏覽器中的搜尋結果]
+```dotenv
+WEBFETCHAPI_URL=http://127.0.0.1:8001
+DJANGO_PORT=8002
+OLLAMA_GATEWAY_URL=http://140.125.35.48:9999
+OLLAMA_GATEWAY_API_KEY=你的Pi金鑰
+OLLAMA_MODEL=實際安裝的模型名稱
+OLLAMA_CONTEXT_TOKENS=8192
+OLLAMA_OUTPUT_TOKENS=1024
+OLLAMA_SAFETY_TOKENS=512
+LLM_DEMO_MODE=0
 ```
 
-## 驗證範例網站
+`OLLAMA_CONTEXT_TOKENS` 是希望配置的 context，不代表每個模型或伺服器都能支援該大小。範例還會讀取模型上限；詳細原理見 [context 預算](context-budget.md)。必須能從目前網路連到 Pi，且符合 Pi gateway 的來源網段限制。
 
-安裝網站套件後，在 repo 根目錄執行：
+填入 key 後，可先查詢模型名稱，不進行推論：
 
 ```powershell
 # Windows PowerShell
-.\.venv\Scripts\python.exe examples/django_site/manage.py check
-.\.venv\Scripts\python.exe examples/django_site/manage.py test searchdemo
+.\.venv\Scripts\python.exe examples/django_summary_site/list_models.py
 ```
 
 ```bash
 # macOS / Raspberry Pi
-.venv/bin/python examples/django_site/manage.py check
-.venv/bin/python examples/django_site/manage.py test searchdemo
+.venv/bin/python examples/django_summary_site/list_models.py
 ```
 
-測試以模擬 HTTP 回應確認表單、CSRF、後端呼叫與 HTML escaping，不會消耗搜尋額度。
+將其中一個名稱填入 `.env` 的 `OLLAMA_MODEL`，再啟動：
 
-參考：[Django 非同步支援](https://docs.djangoproject.com/en/5.2/topics/async/)、[HTTPX 非同步用法](https://www.python-httpx.org/async/)。
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\python.exe examples/django_summary_site/run.py
+```
+
+```bash
+# macOS / Raspberry Pi
+.venv/bin/python examples/django_summary_site/run.py
+```
+
+開啟 [http://127.0.0.1:8002](http://127.0.0.1:8002)，輸入關鍵字、希望整理的問題與模型名稱，按「搜尋並彙整」。頁面呈現 context 預算、選取段落、模型回答、實際 token 統計及原始搜尋來源。每次提交是獨立問題，沒有附加既往對話歷史。
+
+流程如下：
+
+1. Django 向 Pi 的 `/api/show` 取得模型資訊，未設定 key 或模型資訊不可用時不進行搜尋。
+2. Django 呼叫本機 `/api/search` 取得片段與正文。
+3. Django 計算模型輸入預算，選取可以放入的段落。
+4. Django 向 Pi 的 `/api/chat` 發出請求，附上 `X-API-Key`、`num_ctx` 與 `num_predict`。
+5. 回應失敗時，仍顯示已取得的搜尋資料；輸入放不下時，不呼叫 `/api/chat`。
+
+## 不連外驗證完整流程
+
+根目錄 `.env` 設 `DEMO_MODE=1`；第二個 Django 的 `.env` 設 `LLM_DEMO_MODE=1`。重新啟動程式後，搜尋與模型都使用固定示範資料，不需要任何金鑰。第一個網站仍展示片段和正文；第二個網站仍執行真實的 context 選取演算法，但回答明確標示 DEMO。
+
+兩種 DEMO 設定分開：只開啟 `LLM_DEMO_MODE` 不會把真實搜尋改成離線；只開啟根目錄 `DEMO_MODE` 也不會停用第二個 Django 的真實模型呼叫。
+
+## 在自己的 Django 專案中呼叫搜尋服務
+
+```python
+import httpx
+
+with httpx.Client(timeout=90, trust_env=False) as client:
+    response = client.post('http://127.0.0.1:8001/api/search', json={
+        'query': 'Raspberry Pi 5 用途',
+        'max_results': 5,
+        'include_body': True,
+    })
+    response.raise_for_status()
+    sources = response.json()['sources']
+```
+
+這段程式應在 Django 後端執行。對應完整程式見第一個網站的 `searchdemo/views.py`。若使用 `async def` view，可改用 `httpx.AsyncClient` 與 `await client.post(...)`；同步 `response.json()` 不加 `await`。完整非同步請求處理還需搭配 ASGI 與相容 middleware。
+
+模型相關的 `summarydemo/services.py`、`context_budget.py` 可作為第二步整合參考，與搜尋服務沒有 Python import 相依，只透過 HTTP 取得資料。
+
+兩個範例都不需要資料庫或 `migrate`。預設 `DEBUG=True`、開發用 `SECRET_KEY` 與 `runserver` 僅供本機開發；整合到自己的網站時應沿用該網站的部署設定。勿把外部內容或模型回答標記成 template 的 `safe`。

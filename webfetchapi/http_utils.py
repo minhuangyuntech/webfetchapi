@@ -15,7 +15,7 @@ async def read_json(client, method, url, *, label, limit=2_000_000, **kwargs):
                 if status in (401, 403):
                     raise UpstreamError(f'{label}認證或來源網段設定有誤。', 502, 'upstream_auth')
                 if status == 404:
-                    raise UpstreamError(f'{label}找不到指定模型或 API 路徑。', 502, 'upstream_not_found')
+                    raise UpstreamError(f'{label}找不到指定 API 路徑。', 502, 'upstream_not_found')
                 raise UpstreamError(f'{label}回報服務錯誤（HTTP {status}）。')
             parts, size = [], 0
             async for part in response.aiter_bytes():

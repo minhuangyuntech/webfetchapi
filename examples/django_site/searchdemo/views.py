@@ -14,10 +14,11 @@ def index(request):
         try:
             # This runs on the Django server, not in browser JavaScript.
             # Both Python services run on the same computer/network namespace.
-            with httpx.Client(timeout=30, trust_env=False) as client:
+            with httpx.Client(timeout=90, trust_env=False) as client:
                 response = client.post(f'{settings.WEBFETCHAPI_URL}/api/search',
                     json={'query': form.cleaned_data['query'],
-                          'max_results': form.cleaned_data['max_results']})
+                          'max_results': form.cleaned_data['max_results'],
+                          'include_body': form.cleaned_data['include_body']})
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict) or not isinstance(data.get('sources'), list):

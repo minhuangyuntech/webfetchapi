@@ -10,7 +10,8 @@ def demo_sources(target, count):
                    url=f'https://example.com/demo/{i+1}', content=text)
             for i, (title, text) in enumerate(rows[:count])]
 
-def demo_answer(target):
-    return (f'DEMO 示範回應：這不是即時搜尋或真實模型生成。\n\n'
-            f'「{target}」的背景整理範例，依據示範資料 A 呈現。[1]\n'
-            '實際模式會根據搜尋片段整理內容，並標示可核對的來源。')
+def demo_body(source_id, query):
+    return (f'DEMO 正文 {source_id}：{query}\n\n'
+            '這是固定離線資料，用來驗證搜尋內容的顯示與後續處理。\n\n'
+            '網路資料應保留標題、網址、取得時間與擷取狀態，讓使用者能回到來源檢查。\n\n'
+            '不同來源可能有不同日期與觀點；內容相似不代表每一個細節都相同。')

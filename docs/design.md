@@ -1,62 +1,65 @@
-# 設計與檔案關係
+# 分工與檔案關係
 
-## 執行流程
+## 搜尋服務
+
+```mermaid
+flowchart TD
+    E[__main__.py<br/>loopback 啟動入口] --> A[main.py<br/>FastAPI 路由與生命週期]
+    C[settings.py<br/>Tavily key 與 port] --> A
+    L[local_only.py<br/>本機來源檢查] --> A
+    A --> S[search_service.py<br/>搜尋與正文流程]
+    S --> Q[search_client.py<br/>Search 與 URL 去重]
+    S --> X[extract_client.py<br/>Extract 與正文狀態]
+    Q --> H[http_utils.py<br/>HTTP 上限與錯誤處理]
+    X --> H
+    H --> T[Tavily]
+```
+
+`schemas.py` 定義請求與回應。`demo.py` 提供固定的片段與正文。FastAPI 使用 lifespan 共用 HTTPX AsyncClient，非同步等待 Search、Extract；單 worker 的執行名額涵蓋整個搜尋／擷取流程，失敗時在 `finally` 釋放。
+
+只透過已設定的 Tavily 端點取得內容，程式不直接下載搜尋結果的任意 URL。未提供 Extract 的 `query` 或 `chunks_per_source`，避免把相關片段回應誤認成正文。批次擷取回應按正規化 URL 對應到來源，不能用陣列位置配對。
+
+網址去重限於單次請求；它不是內容去重，也不是跨搜尋快取。文章正文保留供上層自行處理，不執行語意合併或模型改寫。若上層需要對話、歷史或快取，可由 Django 保存查詢、來源及擷取結果。
+
+## Django 範例一
+
+```mermaid
+flowchart LR
+    U[urls.py] --> V[searchdemo/views.py]
+    V --> F[forms.py]
+    V -->|HTTP POST| A[本機搜尋 API]
+    A -->|JSON| V
+    V --> T[index.html<br/>原樣顯示文字]
+```
+
+表單決定是否擷取正文。view 負責呼叫 API、檢查資料與錯誤；template 顯示來源、片段、正文與擷取狀態。沒有模型相關程式。
+
+## Django 範例二
 
 ```mermaid
 sequenceDiagram
-    participant D as 同機 Django
-    participant F as FastAPI
-    participant V as Pydantic
-    participant T as Tavily
-    D->>F: POST /api/search (JSON)
-    F->>F: 檢查本機來源、Host、Origin、Content-Type
-    F->>V: 驗證 query、max_results
-    V-->>F: SearchRequest
-    F->>F: 檢查執行名額
-    F->>T: await HTTPX 搜尋 (Bearer key)
-    Note over F,T: 等待網路時讓出事件迴圈
-    T-->>F: results
-    F->>F: 清理、去重、限制片段長度
-    F-->>D: SearchResponse JSON
+    participant B as 瀏覽器
+    participant D as Django 範例二
+    participant S as 本機搜尋 API
+    participant P as Pi gateway
+    B->>D: 關鍵字、整理問題、模型名稱
+    D->>P: /api/show + Pi key
+    P-->>D: 模型資訊與宣告 context 上限
+    D->>S: /api/search，不附模型金鑰
+    S-->>D: 來源、片段、正文與狀態
+    D->>D: context 預算與段落選取
+    D->>P: /api/chat + Pi key + num_ctx/num_predict
+    P-->>D: 模型回答與 token 統計
+    D-->>B: 回答、預算、送入段落與原始來源
 ```
 
-Tavily key 只存在服務端設定與對外 HTTP 標頭中，不是輸入表單欄位，也不需要傳到 Django 或瀏覽器。獨立服務不儲存對話或搜尋歷史；若網站需要歷史查詢，可在 Django 收到回應後自行存入網站資料庫。
-
-## 程式檔案
-
-| 檔案 | 負責工作 |
+| 檔案 | 工作 |
 |---|---|
-| `webfetchapi/__main__.py` | `python -m webfetchapi` 入口，固定 loopback、單一 worker、停用代理來源標頭 |
-| `webfetchapi/settings.py` | 讀取 repo 根目錄 `.env`，驗證連接埠與必要設定 |
-| `webfetchapi/main.py` | 路由、生命週期、共用 AsyncClient、錯誤回應與執行名額 |
-| `webfetchapi/local_only.py` | 本機來源、Host、瀏覽器 Origin、JSON 格式限制 |
-| `webfetchapi/schemas.py` | Pydantic 請求與回應模型 |
-| `webfetchapi/search_service.py` | 純搜尋流程及 DEMO 分支 |
-| `webfetchapi/search_client.py` | 呼叫 Tavily、來源網址清理、去重、片段長度限制 |
-| `webfetchapi/http_utils.py` | HTTP 回應大小限制、JSON 解析、逾時與上游錯誤轉換 |
-| `webfetchapi/research_service.py` | 選用的模型確認、搜尋、整理與引用編號檢查 |
-| `webfetchapi/ollama_client.py` | 選用的 Pi gateway 模型清單與聊天 API |
-| `webfetchapi/prompts.py` | 選用的整理提示詞，分開指令與來源資料 |
-| `webfetchapi/demo.py` | 固定離線示範資料 |
-| `webfetchapi/errors.py` | 可對呼叫端呈現的服務錯誤類別 |
+| `summarydemo/forms.py` | 輸入欄位驗證 |
+| `summarydemo/views.py` | 協調模型資訊、搜尋、預算及彙整，保留失敗時的來源 |
+| `summarydemo/services.py` | HTTP 介面，Pi key 僅附在 Pi 請求 |
+| `summarydemo/context_budget.py` | 完整訊息估算、段落相關性與容量選取 |
+| `summarydemo/templates/summarydemo/index.html` | 模型回答、輸入容量與來源呈現 |
+| `list_models.py` | 依網站 `.env` 查詢 Pi 已安裝模型 |
 
-## 非同步處理
-
-FastAPI 啟動時透過 lifespan 建立一個 `httpx.AsyncClient`，關閉時釋放它。不同請求共用連線池，避免每次搜尋重新建立 client；`trust_env=False` 避免繼承系統代理設定干擾本機／校內連線。
-
-```python
-async def search(payload: SearchRequest, request: Request):
-    return await limited(request.app.state, search_only, payload)
-```
-
-路由接收 Pydantic 已驗證的資料後進入 `search_only()`。連外的 `await` 讓事件迴圈可以處理其他請求；結果回來後繼續清理資料。純文字清理與 JSON 解析仍是同步工作，所以限制上游回應大小與片段長度。
-
-搜尋與研究共用最多 4 個執行名額。名額檢查與加一之間沒有 `await`，在目前單 worker、單事件迴圈的設定下可避免交錯；`finally` 確保成功或失敗都釋放名額。若未來改為多 worker，這個計數只會是各行程自己的計數，必須重新設計全域流量限制。
-
-## 為何使用固定本機位址
-
-`127.0.0.1` 指向執行服務的電腦，不會公開到區域網路。本專案同時在啟動入口固定 socket 綁定位址、在 ASGI middleware 檢查來源；`X-Forwarded-For` 不會被用來取代真實連線來源。
-
-瀏覽器的跨來源請求也要另外檢查：不同網站可能試著呼叫使用者電腦上的服務。因此只允許相同 `Origin` 的瀏覽器請求；不同連接埠的 Django 頁面應交由 Django 後端呼叫。Swagger `/docs` 與 API 同來源，可直接測試。
-
-這些設定以一般本機開發為使用情境；不隔離同機的不同登入帳號，也不應當作可對外公開服務的身分認證方案。
+兩個 Django 專案分開使用自己的 settings 與 `.env`，不互相 import，也不 import FastAPI 的 Python package。它們可以使用各自的 venv；操作文件為方便練習共用同一個 venv，但仍是獨立行程與 HTTP 服務。

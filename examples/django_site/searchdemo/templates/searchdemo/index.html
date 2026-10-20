@@ -12,6 +12,7 @@
     form,article {background:var(--panel);border:1px solid #315161;border-radius:16px;padding:24px;margin:24px 0}
     form p {margin:0 0 16px} label {display:block;margin-bottom:6px} input {width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid #628594;border-radius:8px;padding:12px}
     input[type=number] {max-width:140px} button {font:inherit;font-weight:700;background:var(--accent);color:#102635;border:0;border-radius:8px;padding:12px 28px;cursor:pointer}
+    input[type=checkbox] {width:auto} .body-text {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-width:100%}
     a {color:var(--accent);overflow-wrap:anywhere} h2 {font-size:22px;margin:0 0 8px} article p {white-space:pre-wrap;overflow-wrap:anywhere}
     .notice {border-left:3px solid var(--accent);padding:10px 16px;background:#163442} .error,.errorlist {color:#ffc4b8}
     .meta {font-size:14px} .badge {display:inline-block;padding:2px 10px;border:1px solid #628594;border-radius:20px;font-size:13px}
@@ -20,7 +21,7 @@
 <body><main>
   <div class="eyebrow">DJANGO → FASTAPI → WEB SEARCH</div>
   <h1>搜尋網路上的參考資料</h1>
-  <p class="intro">輸入搜尋對象與問題，查看來源標題、網址與內容片段。</p>
+  <p class="intro">輸入關鍵字，查看搜尋片段、擷取正文與來源網址。</p>
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}
@@ -35,7 +36,11 @@
       <article>
         <h2>[{{ source.id }}] {{ source.title }}</h2>
         <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>
-        <p>{{ source.content }}</p>
+        <h3>搜尋片段</h3><div class="body-text">{{ source.content }}</div>
+        <p class="meta">正文擷取：{{ source.extraction_status }}{% if source.fetched_at %} · {{ source.fetched_at }}{% endif %}</p>
+        {% if source.body_truncated %}<p class="notice">正文達到服務傳輸長度上限，下方內容不是完整正文。</p>{% endif %}
+        {% if source.extraction_error %}<p class="notice">{{ source.extraction_error }}</p>{% endif %}
+        {% if source.body_text %}<h3>擷取正文</h3><div class="body-text">{{ source.body_text }}</div>{% endif %}
         {% if source.published_date %}<p class="meta">來源提供的日期：{{ source.published_date }}</p>{% endif %}
       </article>
     {% empty %}<p class="notice">這次沒有可用的搜尋結果，請調整搜尋字詞。</p>{% endfor %}

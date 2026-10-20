@@ -1,5 +1,9 @@
 """Local learning example. No database or migrations are required."""
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / '.env', override=False, encoding='utf-8-sig')
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'local-learning-example-only-do-not-use-in-production')
 DEBUG = True
@@ -19,3 +23,6 @@ TIME_ZONE = 'Asia/Taipei'
 USE_TZ = True
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 WEBFETCHAPI_URL = os.environ.get('WEBFETCHAPI_URL', 'http://127.0.0.1:8001').rstrip('/')
+DJANGO_PORT = int(os.environ.get('DJANGO_PORT', '8000'))
+if not 1024 <= DJANGO_PORT <= 65535:
+    raise ValueError('DJANGO_PORT 必須是 1024 到 65535 的整數。')

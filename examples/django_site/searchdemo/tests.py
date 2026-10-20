@@ -15,12 +15,14 @@ class WebsiteTests(SimpleTestCase):
         upstream.post.return_value = httpx.Response(200, request=httpx.Request('POST', 'http://127.0.0.1:8001/api/search'),
             json={'mode': 'live', 'query': 'Pi', 'warnings': [], 'timings': {'search_seconds': 0.1},
                   'sources': [{'id': 1, 'title': '<script>alert(1)</script>',
-                               'url': 'https://example.org', 'content': '<b>片段</b>'}]})
-        response = self.client.post('/', {'query': 'Pi', 'max_results': 3})
+                               'url': 'https://example.org', 'content': '<b>片段</b>',
+                               'body_text': '第一段\n\n<script>正文</script>', 'extraction_status': 'ok'}]})
+        response = self.client.post('/', {'query': 'Pi', 'max_results': 3, 'include_body': 'on'})
         self.assertContains(response, '&lt;script&gt;')
         self.assertNotContains(response, '<script>')
+        self.assertContains(response, '第一段\n\n&lt;script&gt;正文&lt;/script&gt;')
         upstream.post.assert_called_once_with('http://127.0.0.1:8001/api/search',
-            json={'query': 'Pi', 'max_results': 3})
+            json={'query': 'Pi', 'max_results': 3, 'include_body': True})
 
     @patch('searchdemo.views.httpx.Client')
     def test_connection_error_is_readable(self, client_class):

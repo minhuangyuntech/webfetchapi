@@ -34,17 +34,18 @@ class SearchTests(unittest.TestCase):
 
         settings = Settings(demo=False, tavily_key='test-search-key')
         with local_client(settings, httpx.MockTransport(provider)) as c:
-            response = c.post('/api/search', json={'query': ' Raspberry Pi ', 'max_results': 3})
+            response = c.post('/api/search', json={'query': ' Raspberry Pi ', 'max_results': 3, 'include_body': False})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['status'], 'ok')
             self.assertEqual(response.json()['mode'], 'live')
             self.assertEqual(len(response.json()['sources']), 1)
-            self.assertEqual(response.json()['timings']['model_seconds'], 0)
+            self.assertEqual(response.json()['timings']['extract_seconds'], 0)
             self.assertNotIn('test-search-key', response.text)
-            self.assertFalse(c.get('/healthz').json()['research_enabled'])
-            self.assertEqual(c.get('/api/models').status_code, 503)
-            self.assertEqual(c.post('/api/research', json={
-                'target': 'Pi', 'question': '特色'}).json()['code'], 'model_not_configured')
+            self.assertNotIn('research_enabled', c.get('/healthz').json())
+            self.assertEqual(c.get('/api/models').status_code, 404)
+            self.assertEqual(c.post('/api/research', json={'target': 'Pi', 'question': '特色'}).status_code, 404)
+            paths = c.get('/openapi.json').json()['paths']
+            self.assertEqual(set(paths), {'/api/search', '/healthz'})
         self.assertEqual(len(seen), 1)
 
     def test_demo_never_uses_network(self):
@@ -128,14 +129,13 @@ class ConfigurationTests(unittest.TestCase):
                 config = Settings.from_env(env)
                 self.assertEqual(config.port, 8123)
                 self.assertEqual(config.tavily_key, 'test-from-file')
-                self.assertFalse(config.research_enabled)
+                self.assertFalse(hasattr(config, 'gateway_key'))
             with patch.dict(os.environ, {'PORT': '8124'}, clear=True):
                 self.assertEqual(Settings.from_env(env).port, 8124)
 
     def test_bad_config(self):
         for values in ({'PORT': 'abc'}, {'PORT': '80'}, {'PORT': '65536'},
-                       {'DEMO_MODE': 'yes'}, {'DEMO_MODE': '0', 'TAVILY_API_KEY': ''},
-                       {'OLLAMA_GATEWAY_API_KEY': 'test', 'OLLAMA_GATEWAY_URL': 'file:///bad'}):
+                       {'DEMO_MODE': 'yes'}, {'DEMO_MODE': '0', 'TAVILY_API_KEY': ''}):
             with self.subTest(values=values), patch.dict(os.environ, {'DEMO_MODE': '1'} | values, clear=True):
                 with self.assertRaises(ValueError):
                     Settings.from_env('nonexistent-test.env')

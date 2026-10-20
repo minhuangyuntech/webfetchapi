@@ -52,7 +52,7 @@ class LocalOnlyMiddleware:
         if scope['method'] not in ('GET', 'HEAD', 'OPTIONS') and headers.get('sec-fetch-site') == 'cross-site':
             await self.reject(scope, receive, send, 403, 'cross_site', '不接受外部網站發起的寫入請求。')
             return
-        if scope['method'] == 'POST' and scope['path'] in ('/api/search', '/api/research'):
+        if scope['method'] == 'POST' and scope['path'] == '/api/search':
             if headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
                 await self.reject(scope, receive, send, 415, 'json_required', '請使用 application/json 傳送 JSON。')
                 return
